@@ -33,11 +33,16 @@ def custom_css():
                 padding-top: 0;
                 padding-bottom: 0;
             }
-            .uploaded-file {
+            .uploaded-file, .recorded-audio {
                 border: 1px solid #4a4a4a;
                 border-radius: 5px;
-                padding: 5px;
+                padding: 10px;
                 background-color: #f1f1f1;
+                width: 100%;
+                height: 250px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -128,12 +133,20 @@ os.makedirs("data/text", exist_ok=True)  # Transcribed documents
 st.markdown(f"<div class='main-title'>{main_title_text}</div>", unsafe_allow_html=True)
 st.markdown(f"<div class='sub-title'>{sub_title_text}</div>", unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
+# Adjust column widths: make the second column wider
+col1, col2 = st.columns([1, 2])  # Second column is larger
 
 # File Upload Section
 with col1:
     st.markdown(f"### {upload_text}")
-    uploaded_file = st.file_uploader(choose_file_text, type=["mp3", "wav", "flac", "mp4", "m4a", "aifc"], help=max_size_help)
+    with st.container():
+        st.markdown(f"<div class='uploaded-file'>", unsafe_allow_html=True)
+        uploaded_file = st.file_uploader(
+            choose_file_text,
+            type=["mp3", "wav", "flac", "mp4", "m4a", "aifc"],
+            help=max_size_help
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if uploaded_file:
         current_file_hash = hashlib.md5(uploaded_file.read()).hexdigest()
@@ -161,7 +174,10 @@ with col1:
 # Audio Recorder Section
 with col2:
     st.markdown(f"### {rec_text}")
-    audio = st.experimental_audio_input(record_text)
+    with st.container():
+        st.markdown(f"<div class='recorded-audio'>", unsafe_allow_html=True)
+        audio = st.experimental_audio_input(record_text)
+        st.markdown("</div>", unsafe_allow_html=True)
     
     if audio:
         current_file_hash = hashlib.md5(audio.read()).hexdigest()

@@ -1,51 +1,62 @@
-
-# Python imports
 import os
-from os import environ
-from datetime import datetime
 import hashlib
 import hmac
 from concurrent.futures import ThreadPoolExecutor
 
-# External imports
 import streamlit as st
-from openai import OpenAI
-#from audiorecorder import audiorecorder
-import tiktoken
+import openai
 
-# Local imports
 from functions.transcribe import transcribe_with_whisper_openai
-import config as c
 from functions.split_audio import split_audio_to_chunks
-from functions.styling import page_config, styling
-from functions.menu import menu
+from functions.menu import menu  # Assuming this function is defined elsewhere
 
-### CSS AND STYLING
+### Custom CSS for Styling
+def custom_css():
+    st.markdown("""
+        <style>
+            .main-title { 
+                font-size: 32px;
+                color: #4a4a4a;
+                font-weight: bold;
+            }
+            .sub-title { 
+                font-size: 20px; 
+                color: #4a4a4a; 
+                margin-bottom: 10px;
+            }
+            .sidebar .sidebar-content { 
+                background-color: #f5f5f5; 
+                padding: 20px; 
+                border-radius: 10px; 
+            }
+            .css-1aumxhk {
+                padding-top: 0;
+                padding-bottom: 0;
+            }
+            .uploaded-file {
+                border: 1px solid #4a4a4a;
+                border-radius: 5px;
+                padding: 5px;
+                background-color: #f1f1f1;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+custom_css()
 
-st.logo("images/logo_main.png", icon_image = "images/logo_small.png")
+### Sidebar with Menu
+st.sidebar.title("Settings")
+st.sidebar.markdown("🔊 **Audio Options**")
+st.sidebar.markdown("📝 **Transcription Settings**")
+st.sidebar.markdown("🌐 **Language**")
+menu()  # Assuming this sets up additional menu elements
 
-page_config()
-styling()
-
-# Check if language is already in session_state, else initialize it with a default value
-if 'language' not in st.session_state:
-    st.session_state['language'] = "Svenska"  # Default language
-
-st.session_state["pwd_on"] = st.secrets.pwd_on
-
-### PASSWORD
-
-if st.session_state["pwd_on"] == "true":
+### Authentication (Password Check)
+if st.secrets.pwd_on == "true":
 
     def check_password():
-
-        if c.deployment == "streamlit":
-            passwd = st.secrets["password"]
-        else:
-            passwd = environ.get("password")
-
+        passwd = st.secrets["password"]
+        
         def password_entered():
-
             if hmac.compare_digest(st.session_state["password"], passwd):
                 st.session_state["password_correct"] = True
                 del st.session_state["password"]  # Don't store the password.
@@ -60,209 +71,144 @@ if st.session_state["pwd_on"] == "true":
             st.error("😕 Ooops. Fel lösenord.")
         return False
 
-
     if not check_password():
         st.stop()
 
-############
+### Translation
+if 'language' not in st.session_state:
+    st.session_state['language'] = "Svenska"  # Default language
 
-# Translation
 if st.session_state['language'] == "Svenska":
     page_name = "Transkribering"
     upload_text = "Ladda upp"
     rec_text = "Spela in"
     record_text = "Klicka på mikrofonikonen för att spela in"
     splitting_audio_text = "Delar upp ljudfilen i mindre bitar..."
-    transcribing_text = "Transkriberar alla ljudbitar. Det här kan ta ett tag beroende på lång inspelningen är..."
+    transcribing_text = "Transkriberar alla ljudbitar. Det här kan ta ett tag beroende på hur lång inspelningen är..."
     transcription_done_text = "Transkribering klar!"
     record_stop = "Stoppa inspelning"
-
+    choose_file_text = "Välj en fil"
+    max_size_help = "Max 10GB"
+    main_title_text = "Transkriberingstjänst"
+    sub_title_text = "Ladda upp eller spela in ljud"
 elif st.session_state['language'] == "English":
     page_name = "Transcribe"
     upload_text = "Upload"
     rec_text = "Record"
-    record_text = "Click on the microfon icon to record"
+    record_text = "Click on the microphone icon to record"
     splitting_audio_text = "Splitting the audio file into smaller pieces..."
     transcribing_text = "Transcribing all audio pieces. This may take a while depending on how long the recording is..."
     transcription_done_text = "Transcription done!"
     record_stop = "Stop recording"
+    choose_file_text = "Choose a file"
+    max_size_help = "Max 10GB"
+    main_title_text = "Transcription Service"
+    sub_title_text = "Upload or Record Audio"
+else:
+    # Default to English if language not recognized
+    page_name = "Transcribe"
+    upload_text = "Upload"
+    rec_text = "Record"
+    record_text = "Click on the microphone icon to record"
+    splitting_audio_text = "Splitting the audio file into smaller pieces..."
+    transcribing_text = "Transcribing all audio pieces. This may take a while depending on how long the recording is..."
+    transcription_done_text = "Transcription done!"
+    record_stop = "Stop recording"
+    choose_file_text = "Choose a file"
+    max_size_help = "Max 10GB"
+    main_title_text = "Transcription Service"
+    sub_title_text = "Upload or Record Audio"
 
+# Setting up storage directories
+os.makedirs("data/audio", exist_ok=True)  # Audio files for transcription
+os.makedirs("data/audio_chunks", exist_ok=True)  # Audio chunks
+os.makedirs("data/text", exist_ok=True)  # Transcribed documents
 
-os.makedirs("data/audio", exist_ok=True) # Where audio/video files are stored for transcription
-os.makedirs("data/audio_chunks", exist_ok=True) # Where audio/video files are stored for transcription
-os.makedirs("data/text", exist_ok=True) # Where transcribed document are beeing stored
+### Main Layout
+st.markdown(f"<div class='main-title'>{main_title_text}</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='sub-title'>{sub_title_text}</div>", unsafe_allow_html=True)
 
+col1, col2 = st.columns(2)
 
-### SIDEBAR
+# File Upload Section
+with col1:
+    st.markdown(f"### {upload_text}")
+    uploaded_file = st.file_uploader(choose_file_text, type=["mp3", "wav", "flac", "mp4", "m4a", "aifc"], help=max_size_help)
 
-menu()
+    if uploaded_file:
+        current_file_hash = hashlib.md5(uploaded_file.read()).hexdigest()
+        uploaded_file.seek(0)  # Reset the file pointer
 
-st.markdown(f"""#### :material/graphic_eq: {page_name}
-""")
+        if "file_hash" not in st.session_state or st.session_state.file_hash != current_file_hash:
+            st.session_state.file_hash = current_file_hash
+            if "transcribed" in st.session_state:
+                del st.session_state.transcribed
 
+        if "transcribed" not in st.session_state:
+            with st.spinner(splitting_audio_text):
+                chunk_paths = split_audio_to_chunks(uploaded_file)
 
-# Check and set default values if not set in session_state
-# of Streamlit
+            with st.spinner(transcribing_text):
+                with ThreadPoolExecutor() as executor:
+                    transcriptions = list(executor.map(
+                        lambda chunk: transcribe_with_whisper_openai(open(chunk, "rb"), os.path.basename(chunk)), 
+                        chunk_paths
+                    ))
 
-if "spoken_language" not in st.session_state: # What language source audio is in
-    st.session_state["spoken_language"] = "Svenska"
-if "file_name_converted" not in st.session_state: # Audio file name
-    st.session_state["file_name_converted"] = None
-if "gpt_template" not in st.session_state: # Audio file name
-    st.session_state["gpt_template"] = "Whisper Prompt"
-if "audio_file" not in st.session_state:
-    st.session_state["audio_file"] = False
+            st.session_state.transcribed = "\n".join(transcriptions)
+            st.success(transcription_done_text)
 
-
-# Checking if uploaded or recorded audio file has been transcribed
-def compute_file_hash(uploaded_file):
-
-    print("\nSTART: Check if audio file has been transcribed - hash")
-
-    # Compute the MD5 hash of a file
-    hasher = hashlib.md5()
+# Audio Recorder Section
+with col2:
+    st.markdown(f"### {rec_text}")
+    audio = st.experimental_audio_input(record_text)
     
-    for chunk in iter(lambda: uploaded_file.read(4096), b""):
-        hasher.update(chunk)
-    uploaded_file.seek(0)  # Reset the file pointer to the beginning
+    if audio:
+        current_file_hash = hashlib.md5(audio.read()).hexdigest()
+        audio.seek(0)
 
-    print("DONE: Check if audio file has been transcribed - hash")
-    
-    return hasher.hexdigest()
+        if "file_hash" not in st.session_state or st.session_state.file_hash != current_file_hash:
+            st.session_state.file_hash = current_file_hash
+            if "transcribed" in st.session_state:
+                del st.session_state.transcribed
 
+        if "transcribed" not in st.session_state:
+            with st.spinner(splitting_audio_text):
+                chunk_paths = split_audio_to_chunks(audio)
 
-# Count tokens 
+            with st.spinner(transcribing_text):
+                with ThreadPoolExecutor() as executor:
+                    transcriptions = list(executor.map(
+                        lambda chunk: transcribe_with_whisper_openai(open(chunk, "rb"), os.path.basename(chunk)), 
+                        chunk_paths
+                    ))
 
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    
-    """Returns the number of tokens in a text string."""
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
+            st.session_state.transcribed = "\n".join(transcriptions)
+            st.success(transcription_done_text)
 
+# Display Transcription
+if "transcribed" in st.session_state:
+    st.markdown(f"#### {page_name}")
+    st.markdown(st.session_state.transcribed)
 
-### MAIN APP ###########################
+### Footer
+def add_footer():
+    st.markdown("""
+        <style>
+            footer {visibility: hidden;}
+            .footer {
+                position: fixed;
+                bottom: 0;
+                width: 100%;
+                color: #4a4a4a;
+                text-align: center;
+                padding: 10px;
+                font-size: 12px;
+            }
+        </style>
+        <div class="footer">
+            Developed by Mistymehere | Powered by OpenAI Whisper API
+        </div>
+    """, unsafe_allow_html=True)
 
-def main():
-
-    global translation
-    global model_map_transcribe_model
-
-    ### SIDEBAR
-
-    ###### SIDEBAR SETTINGS
-    
-    #st.sidebar.warning("""Det här är en prototyp som transkriberar ljud och 
-    #                   bearbetas med en språkmodell, baserat på den mall du väljer. 
-    #                   Prototypen är __inte GDPR-säkrad__, då den använder AI-modeller 
-    #                   som körs på servrar i USA. Testa endast med okej data.""")
-    
-
-    ### ### ### ### ### ### ### ### ### ### ###
-    ### MAIN PAGE
-    
-    # CREATE THREE TWO FOR FILE UPLOAD VS RECORDED AUDIO    
-
-    tab1, tab2 = st.tabs([f"{upload_text}", f"{rec_text}"])
-
-
-    # FILE UPLOADER
-
-    with tab1:
-        
-        uploaded_file = st.file_uploader(
-            "Ladda upp din ljud- eller videofil här",
-            type=["mp3", "wav", "flac", "mp4", "m4a", "aifc"],
-            help="Max 10GB stora filer", label_visibility="collapsed",
-            )
-
-        if uploaded_file:
-
-            # Checks if uploaded file has already been transcribed
-            current_file_hash = compute_file_hash(uploaded_file)
-
-            # If the uploaded file hash is different from the one in session state, reset the state
-            if "file_hash" not in st.session_state or st.session_state.file_hash != current_file_hash:
-                st.session_state.file_hash = current_file_hash
-                
-                if "transcribed" in st.session_state:
-                    del st.session_state.transcribed
-
-            
-            # If audio has not been transcribed
-            if "transcribed" not in st.session_state:
-
-                with st.spinner(f'{splitting_audio_text}'):
-                    chunk_paths = split_audio_to_chunks(uploaded_file)
-
-                # Transcribe chunks in parallel
-                with st.spinner(f'{transcribing_text}'):
-                    with ThreadPoolExecutor() as executor:
-                        # Open each chunk as a file object and pass it to transcribe_with_whisper_openai
-                        transcriptions = list(executor.map(
-                            lambda chunk: transcribe_with_whisper_openai(open(chunk, "rb"), os.path.basename(chunk)), 
-                            chunk_paths
-                        )) 
-                
-                # Combine all the transcriptions into one
-                st.session_state.transcribed = "\n".join(transcriptions)
-                st.success(f'{transcription_done_text}')
-            
-            token_count = num_tokens_from_string(st.session_state.transcribed, "o200k_base")
-            #st.info(f"Antal tokens: {token_count}")
-
-            st.markdown(f"#### {page_name}")
-            st.markdown(st.session_state.transcribed)
-
-            st.markdown("# ")
-
-        
-    # AUDIO RECORDER ###### ###### ######
-
-    with tab2:
-
-        # Creates the audio recorder
-        audio = st.experimental_audio_input(f"{record_text}")
-
-        # The rest of the code in tab2 works the same way as in tab1, so it's not going to be
-        # commented.
-        if audio:
-
-            # Open the saved audio file and compute its hash
-            current_file_hash = compute_file_hash(audio)
-
-            # If the uploaded file hash is different from the one in session state, reset the state
-            if "file_hash" not in st.session_state or st.session_state.file_hash != current_file_hash:
-                st.session_state.file_hash = current_file_hash
-                
-                if "transcribed" in st.session_state:
-                    del st.session_state.transcribed
-                
-            if "transcribed" not in st.session_state:
-
-                with st.status(f'{splitting_audio_text}'):
-                    chunk_paths = split_audio_to_chunks(audio)
-
-                # Transcribe chunks in parallel
-                with st.status(f'{transcribing_text}'):
-                    with ThreadPoolExecutor() as executor:
-                        # Open each chunk as a file object and pass it to transcribe_with_whisper_openai
-                        transcriptions = list(executor.map(
-                            lambda chunk: transcribe_with_whisper_openai(open(chunk, "rb"), os.path.basename(chunk)), 
-                            chunk_paths
-                        )) 
-                
-                # Combine all the transcriptions into one
-                st.session_state.transcribed = "\n".join(transcriptions)
-
-            token_count = num_tokens_from_string(st.session_state.transcribed, "o200k_base")
-            #st.info(f"Antal tokens: {token_count}")
-
-            st.markdown(f"#### {page_name}")
-            st.markdown(st.session_state.transcribed)
-            
-            st.markdown("# ")
-
-
-if __name__ == "__main__":
-    main()
+add_footer()
